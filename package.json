@@ -1,0 +1,11 @@
+{
+  "name": "text-to-sql-with-clarification-engine",
+  "version": "1.0.0",
+  "description": "Production GenAI Text-to-SQL application with LangGraph Clarification Engine",
+  "scripts": {
+    "dev": "python run.py",
+    "dev:backend": "cd backend && ..\\.venv\\Scripts\\python -m uvicorn app.main:app --reload --port 8000",
+    "dev:frontend": "cd frontend && npm run dev",
+    "test": ".\\.venv\\Scripts\\pytest backend\\tests -v"
+  }
+}
