@@ -42,67 +42,15 @@ A production-grade GenAI application enabling users to connect their SQL databas
 - `.db` and `.sqlite` files, plus SQL text files (`.sql`, `.dump`, `.bak`, and `.sql.gz`), are staged in a temporary directory while they are validated/imported. Temporary files are automatically removed after processing; queryable data remains in memory for the active backend process.
 - Uploaded connections disappear when removed or when the backend restarts. They are not persisted or reloaded from disk.
 - Defaults can be adjusted in the backend environment: `MAX_UPLOAD_BYTES` (50 MB), `MAX_IN_MEMORY_TABLE_UPLOAD_BYTES` (25 MB), and `MAX_DECOMPRESSED_SQL_BYTES` (200 MB).
-- `.bak` support is for SQL text scripts only; native binary SQL Server backup files need SQL Server restore tooling and are not supported by this importer.
 
----
+### Planned: RAG for uploaded databases
 
-## 🛠️ Architecture & Tech Stack
+Uploaded databases are currently queried through their extracted schema and the existing SQL-generation workflow. A planned retrieval-augmented generation (RAG) feature will add semantic retrieval for uploaded data:
 
-| Layer | Technology | Role |
-|---|---|---|
-| **Frontend** | React 18, Tailwind CSS, Lucide Icons, Recharts | Interactive Chat UI, Connection Wizard, Schema Explorer, Chart Visualizer |
-| **Backend** | FastAPI, Python 3.12+, Uvicorn, Pydantic v2 | High-performance REST & SSE API endpoints |
-| **Agent / Workflow** | LangGraph, LangChain Core | State graph for ambiguity detection, clarification, SQL generation, validation & recovery |
-| **LLM Provider** | Google Gemini (via `google-genai` / LangChain) | Intent detection, dialect-specific SQL synthesis, data summarization |
-| **SQL Engine** | SQLAlchemy & SQLGlot | Multi-dialect AST parsing, validation, dialect transpilation, connection pooling |
-| **Security & Secrets** | Fernet Encryption (Cryptography) | At-rest encryption of connection credentials, tenant isolation |
-| **Testing & Eval** | Pytest, Golden Query Evaluation Suite | Automated benchmarking and safety test suite |
+- Build embeddings for relevant schema metadata and textual representations of uploaded table data, then store them in a vector index associated with the uploaded database.
+- Embed each natural-language question and retrieve the most relevant schema and data context from that index.
+- Supply the retrieved context to SQL generation so the model can ground its query in the uploaded database's tables, columns, and content.
+- Continue to execute generated SQL against the uploaded database with the existing read-only SQL validation and query limits; vector retrieval provides context and does not replace SQL execution.
+- Keep each index scoped to its owner and uploaded database, and remove it when that upload is deleted or expires.
 
----
-
-## 📐 LangGraph Workflow
-
-```mermaid
-graph TD
-    A[User Natural Language Prompt] --> B[Intent & Ambiguity Detection]
-    B -->|Ambiguous Request| C[Generate Clarification Questions]
-    C --> D[User Selects / Answers Clarification]
-    D --> B
-    B -->|Clear Request| E[Schema Pruning & Context Grounding]
-    E --> F[Generate SQL for Target Dialect]
-    F --> G[SQLGlot Validation & Safety Guardrails]
-    G -->|Prohibited / Syntax Error| H[Self-Healing Recovery Loop]
-    H --> F
-    G -->|Approved SELECT Query| I[Safe Execution with Limits & Timeout]
-    I --> J[Analyze Results & Format Visualization]
-    J --> K[Return Table, Chart, SQL & Explanation]
-    K --> L[Record Benchmark & Eval Metrics]
-```
-
----
-
-## 📋 Implementation Checklist
-
-- [ ] **Phase 1: Foundation**
-  - [ ] Workspace setup: FastAPI backend & React frontend
-  - [ ] Built-in rich demo database (E-commerce / SaaS)
-  - [ ] Multi-database adapter interface (PostgreSQL, MySQL, SQLite)
-  - [ ] Dynamic schema inspection & metadata cataloging
-  - [ ] SQLGlot query validator & read-only execution harness
-- [ ] **Phase 2: Intelligence & Clarification Engine**
-  - [ ] LangGraph agent state graph implementation
-  - [ ] Ambiguity detection & interactive clarification generation
-  - [ ] Dialect-specific prompt templates with Gemini
-  - [ ] Bounded self-healing query retries
-  - [ ] Dynamic chart recommendation & natural language summaries
-- [ ] **Phase 3: Multi-Database Expansion**
-  - [ ] Connection manager with encrypted credential storage
-  - [ ] SQL Server, MariaDB adapters
-  - [ ] Dialect transpilations
-- [ ] **Phase 4: Evaluation Suite & Local Connectivity**
-  - [ ] Golden evaluation datasets (simple, joins, aggregates, ambiguous)
-  - [ ] Accuracy, latency, and ambiguity detection benchmarks
-  - [ ] Safe local database connector architecture
-- [ ] **Phase 5: Production Hardening**
-  - [ ] Docker containerization & deployment configs (Render / Vercel)
-  - [ ] Audit logging & tenant isolation checks
+This is a planned capability and is not implemented yet. The embedding model and vector-store technology have not been selected.
