@@ -18,6 +18,7 @@ class DatabaseConnectionManager:
     def __init__(self):
         self._adapters: Dict[str, BaseDatabaseAdapter] = {}
         self._schema_cache: Dict[str, DatabaseSchema] = {}
+        self._connection_owners: Dict[str, str] = {}
         self._init_demo_connection()
 
     def _init_demo_connection(self):
@@ -72,9 +73,11 @@ class DatabaseConnectionManager:
     def get_adapter(self, connection_id: str) -> Optional[BaseDatabaseAdapter]:
         return self._adapters.get(connection_id)
 
-    def list_connections(self) -> List[Dict[str, Any]]:
+    def list_connections(self, user_id: str = "local") -> List[Dict[str, Any]]:
         connections = []
         for cid, adapter in self._adapters.items():
+            if cid != "demo-ecommerce" and self._connection_owners.get(cid) != user_id:
+                continue
             connections.append({
                 "connection_id": cid,
                 "name": adapter.name,
@@ -82,6 +85,12 @@ class DatabaseConnectionManager:
                 "is_demo": cid == "demo-ecommerce"
             })
         return connections
+
+    def set_connection_owner(self, connection_id: str, user_id: str) -> None:
+        self._connection_owners[connection_id] = user_id
+
+    def can_access_connection(self, connection_id: str, user_id: str) -> bool:
+        return connection_id == "demo-ecommerce" or self._connection_owners.get(connection_id) == user_id
 
     def get_schema(self, connection_id: str, force_refresh: bool = False) -> DatabaseSchema:
         if not force_refresh and connection_id in self._schema_cache:
@@ -105,6 +114,7 @@ class DatabaseConnectionManager:
         if connection_id in self._adapters:
             self._adapters[connection_id].disconnect()
             del self._adapters[connection_id]
+            self._connection_owners.pop(connection_id, None)
             self.invalidate_schema_cache(connection_id)
             return True
         return False

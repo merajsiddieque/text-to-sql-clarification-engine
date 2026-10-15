@@ -29,6 +29,8 @@ def get_gemini_api_key() -> str:
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Text-to-SQL with Clarification Engine"
     API_V1_STR: str = "/api/v1"
+    FIREBASE_PROJECT_ID: Optional[str] = os.getenv("FIREBASE_PROJECT_ID")
+    REQUIRE_FIREBASE_AUTH: bool = os.getenv("REQUIRE_FIREBASE_AUTH", "false").lower() == "true"
     
     # LLM Settings
     GEMINI_API_KEY: str = get_gemini_api_key()

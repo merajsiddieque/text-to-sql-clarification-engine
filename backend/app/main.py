@@ -2,12 +2,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.routes import connections, schema, query, eval
+from app.core.auth import attach_authenticated_user
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Production Text-to-SQL API with LangGraph Clarification Engine, SQLGlot Validation, and Evaluation Harness",
     version="1.0.0"
 )
+
+app.middleware("http")(attach_authenticated_user)
 
 # CORS Middleware (supports React frontend)
 app.add_middleware(

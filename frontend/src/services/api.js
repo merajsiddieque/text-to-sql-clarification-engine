@@ -1,13 +1,22 @@
+import { auth } from '../../firebase';
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '');
 
+async function authorizedFetch(url, options = {}) {
+  const token = await auth.currentUser?.getIdToken();
+  const headers = new Headers(options.headers || {});
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return fetch(url, { ...options, headers });
+}
+
 export async function fetchConnections() {
-  const res = await fetch(`${API_BASE}/connections`);
+  const res = await authorizedFetch(`${API_BASE}/connections`);
   if (!res.ok) throw new Error('Failed to fetch connections');
   return res.json();
 }
 
 export async function testConnection(payload) {
-  const res = await fetch(`${API_BASE}/connections/test`, {
+  const res = await authorizedFetch(`${API_BASE}/connections/test`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -17,7 +26,7 @@ export async function testConnection(payload) {
 }
 
 export async function createConnection(payload) {
-  const res = await fetch(`${API_BASE}/connections`, {
+  const res = await authorizedFetch(`${API_BASE}/connections`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -30,7 +39,7 @@ export async function createConnection(payload) {
 }
 
 export async function deleteConnection(connectionId) {
-  const res = await fetch(`${API_BASE}/connections/${connectionId}`, {
+  const res = await authorizedFetch(`${API_BASE}/connections/${connectionId}`, {
     method: 'DELETE',
   });
   if (!res.ok) throw new Error('Failed to delete connection');
@@ -38,13 +47,13 @@ export async function deleteConnection(connectionId) {
 }
 
 export async function fetchSchema(connectionId) {
-  const res = await fetch(`${API_BASE}/schema/${connectionId}`);
+  const res = await authorizedFetch(`${API_BASE}/schema/${connectionId}`);
   if (!res.ok) throw new Error('Failed to fetch schema');
   return res.json();
 }
 
 export async function refreshSchema(connectionId) {
-  const res = await fetch(`${API_BASE}/schema/${connectionId}/refresh`, {
+  const res = await authorizedFetch(`${API_BASE}/schema/${connectionId}/refresh`, {
     method: 'POST',
   });
   if (!res.ok) throw new Error('Failed to refresh schema');
@@ -52,7 +61,7 @@ export async function refreshSchema(connectionId) {
 }
 
 export async function runNaturalQuery({ naturalQuery, connectionId, selectedClarification, conversationHistory = [] }) {
-  const res = await fetch(`${API_BASE}/query`, {
+  const res = await authorizedFetch(`${API_BASE}/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -70,7 +79,7 @@ export async function runNaturalQuery({ naturalQuery, connectionId, selectedClar
 }
 
 export async function validateSQL({ sql, connectionId, dialect }) {
-  const res = await fetch(`${API_BASE}/query/validate`, {
+  const res = await authorizedFetch(`${API_BASE}/query/validate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sql, connection_id: connectionId, dialect }),
@@ -80,7 +89,7 @@ export async function validateSQL({ sql, connectionId, dialect }) {
 }
 
 export async function runBenchmarkSuite() {
-  const res = await fetch(`${API_BASE}/eval/benchmark`);
+  const res = await authorizedFetch(`${API_BASE}/eval/benchmark`);
   if (!res.ok) throw new Error('Failed to run benchmark');
   return res.json();
 }
@@ -92,7 +101,7 @@ export async function uploadDatabaseFile(file, customName = '') {
     formData.append('name', customName);
   }
 
-  const res = await fetch(`${API_BASE}/connections/upload`, {
+  const res = await authorizedFetch(`${API_BASE}/connections/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -104,7 +113,7 @@ export async function uploadDatabaseFile(file, customName = '') {
 }
 
 export async function fetchTableData(connectionId, tableName, limit = 100) {
-  const res = await fetch(`${API_BASE}/schema/${connectionId}/table/${encodeURIComponent(tableName)}?limit=${limit}`);
+  const res = await authorizedFetch(`${API_BASE}/schema/${connectionId}/table/${encodeURIComponent(tableName)}?limit=${limit}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || 'Failed to fetch table data');

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -33,9 +33,9 @@ class ConnectionResponse(BaseModel):
 
 
 @router.get("", response_model=List[ConnectionResponse])
-def list_connections():
+def list_connections(request: Request):
     """Lists all registered active database connections."""
-    return db_manager.list_connections()
+    return db_manager.list_connections(request.state.user_id)
 
 
 @router.post("/test")
@@ -66,7 +66,7 @@ def test_connection(req: ConnectRequest):
 
 
 @router.post("", response_model=ConnectionResponse)
-def create_connection(req: ConnectRequest):
+def create_connection(req: ConnectRequest, request: Request):
     """Registers and persists a new database connection."""
     conn_id = f"conn_{uuid.uuid4().hex[:8]}"
     if req.dialect == "sqlite":
@@ -86,6 +86,8 @@ def create_connection(req: ConnectRequest):
         db_manager.remove_connection(conn_id)
         raise HTTPException(status_code=400, detail="Could not connect to target database with provided parameters.")
 
+    db_manager.set_connection_owner(conn_id, request.state.user_id)
+
     return ConnectionResponse(
         connection_id=conn_id,
         name=adapter.name,
@@ -95,10 +97,12 @@ def create_connection(req: ConnectRequest):
 
 
 @router.delete("/{connection_id}")
-def delete_connection(connection_id: str):
+def delete_connection(connection_id: str, request: Request):
     """Removes a registered database connection."""
     if connection_id == "demo-ecommerce":
         raise HTTPException(status_code=400, detail="Cannot delete default demo database.")
+    if not db_manager.can_access_connection(connection_id, request.state.user_id):
+        raise HTTPException(status_code=404, detail="Connection not found.")
     removed = db_manager.remove_connection(connection_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Connection not found.")
@@ -107,6 +111,7 @@ def delete_connection(connection_id: str):
 
 @router.post("/upload")
 async def upload_database(
+    request: Request,
     file: UploadFile = File(...),
     name: Optional[str] = Form(None)
 ):
@@ -127,6 +132,7 @@ async def upload_database(
             filename=file.filename,
             custom_name=name
         )
+        db_manager.set_connection_owner(result["connection_id"], request.state.user_id)
         return result
     except HTTPException:
         raise

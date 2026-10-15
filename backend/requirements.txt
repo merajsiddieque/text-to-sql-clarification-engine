@@ -9,6 +9,7 @@ langchain>=0.1.16
 langchain-core>=0.1.42
 langchain-google-genai>=1.0.1
 google-generativeai>=0.5.0
+google-auth>=2.28.0
 cryptography>=42.0.5
 pytest>=8.1.1
 pytest-asyncio>=0.23.6

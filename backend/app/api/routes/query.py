@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from app.agent.graph import text_to_sql_agent
@@ -22,11 +22,13 @@ class QueryValidationRequest(BaseModel):
 
 
 @router.post("")
-def execute_natural_query(req: QueryExecutionRequest):
+def execute_natural_query(req: QueryExecutionRequest, request: Request):
     """
     Executes the full Text-to-SQL workflow via LangGraph:
     Ambiguity classification -> Clarification OR (SQL generation -> SQLGlot validation -> Safe execution -> Summary).
     """
+    if not db_manager.can_access_connection(req.connection_id, request.state.user_id):
+        raise HTTPException(status_code=404, detail="Connection not found.")
     adapter = db_manager.get_adapter(req.connection_id)
     if not adapter:
         raise HTTPException(status_code=404, detail=f"Connection '{req.connection_id}' not found.")
@@ -79,8 +81,10 @@ def execute_natural_query(req: QueryExecutionRequest):
 
 
 @router.post("/validate", response_model=SQLValidationResult)
-def validate_sql(req: QueryValidationRequest):
+def validate_sql(req: QueryValidationRequest, request: Request):
     """Directly inspects and validates an arbitrary SQL query with SQLGlot AST analysis."""
+    if not db_manager.can_access_connection(req.connection_id, request.state.user_id):
+        raise HTTPException(status_code=404, detail="Connection not found.")
     adapter = db_manager.get_adapter(req.connection_id)
     dialect = req.dialect or (adapter.dialect if adapter else "sqlite")
     
