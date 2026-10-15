@@ -2,7 +2,13 @@ import React, { useState } from 'react';
 import { Database, Plus, CheckCircle2, AlertCircle, Trash2, PlugZap, Shield } from 'lucide-react';
 import { testConnection, createConnection, deleteConnection } from '../../services/api';
 
-export default function ConnectionWizard({ connections, onConnectionsChanged, activeConnectionId, setActiveConnectionId }) {
+export default function ConnectionWizard({
+  connections,
+  onConnectionsChanged,
+  activeConnectionId,
+  setActiveConnectionId,
+  onOpenUploadModal
+}) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -88,19 +94,31 @@ export default function ConnectionWizard({ connections, onConnectionsChanged, ac
       {/* Top Banner */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-5 rounded-2xl border border-slate-800">
         <div>
-          <h2 className="text-lg font-bold text-white">Database Connections</h2>
+          <h2 className="text-lg font-bold text-white">Database Connections & Manual Uploads</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Connect your own cloud or local SQL database with credential encryption at rest.
+            Connect live cloud/local SQL databases or manually upload database dump files (.sql, .sqlite, .db, .dump, .csv, .tsv, .bak, .sql.gz).
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddForm(prev => !prev)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-xs font-semibold text-white shadow-md shadow-brand-600/30 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          {showAddForm ? 'Cancel' : 'Connect New Database'}
-        </button>
+        <div className="flex items-center gap-2.5">
+          {onOpenUploadModal && (
+            <button
+              onClick={onOpenUploadModal}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white shadow-md shadow-emerald-600/30 transition-all"
+            >
+              <Database className="w-4 h-4" />
+              <span>Upload Database File</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setShowAddForm(prev => !prev)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-xs font-semibold text-white shadow-md shadow-brand-600/30 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            {showAddForm ? 'Cancel' : 'Connect Cloud / Server DB'}
+          </button>
+        </div>
       </div>
 
       {/* Add Connection Form Drawer */}

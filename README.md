@@ -36,6 +36,14 @@ A production-grade GenAI application enabling users to connect their SQL databas
      - Schema Grounding
      - Latency & Token Usage
 
+### Uploaded file processing
+
+- CSV and TSV uploads are parsed directly into an in-memory SQLite database. They are limited to 25 MB by default.
+- `.db` and `.sqlite` files, plus SQL text files (`.sql`, `.dump`, `.bak`, and `.sql.gz`), are staged in a temporary directory while they are validated/imported. Temporary files are automatically removed after processing; queryable data remains in memory for the active backend process.
+- Uploaded connections disappear when removed or when the backend restarts. They are not persisted or reloaded from disk.
+- Defaults can be adjusted in the backend environment: `MAX_UPLOAD_BYTES` (50 MB), `MAX_IN_MEMORY_TABLE_UPLOAD_BYTES` (25 MB), and `MAX_DECOMPRESSED_SQL_BYTES` (200 MB).
+- `.bak` support is for SQL text scripts only; native binary SQL Server backup files need SQL Server restore tooling and are not supported by this importer.
+
 ---
 
 ## 🛠️ Architecture & Tech Stack

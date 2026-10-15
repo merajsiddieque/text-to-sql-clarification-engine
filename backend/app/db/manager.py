@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from typing import Dict, Optional, List, Any
 from app.db.adapters.base import BaseDatabaseAdapter
 from app.db.adapters.sqlite_adapter import SQLiteDatabaseAdapter
@@ -37,6 +38,21 @@ class DatabaseConnectionManager:
 
     def register_sqlite(self, connection_id: str, name: str, db_path: str, read_only: bool = True) -> SQLiteDatabaseAdapter:
         adapter = SQLiteDatabaseAdapter(connection_id=connection_id, name=name, db_path=db_path, read_only=read_only)
+        self._adapters[connection_id] = adapter
+        self.invalidate_schema_cache(connection_id)
+        return adapter
+
+    def register_sqlite_from_connection(
+        self, connection_id: str, name: str, source: sqlite3.Connection
+    ) -> SQLiteDatabaseAdapter:
+        """Registers a session-only SQLite database copied from a source connection."""
+        memory_uri = f"file:{connection_id}?mode=memory&cache=shared"
+        adapter = SQLiteDatabaseAdapter(connection_id, name, memory_uri, read_only=False)
+        try:
+            adapter.load_from_connection(source)
+        except Exception:
+            adapter.disconnect()
+            raise
         self._adapters[connection_id] = adapter
         self.invalidate_schema_cache(connection_id)
         return adapter

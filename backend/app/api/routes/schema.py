@@ -25,3 +25,38 @@ def refresh_schema(connection_id: str):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to refresh schema: {str(e)}")
+
+
+@router.get("/{connection_id}/table/{table_name}")
+def get_table_data(
+    connection_id: str,
+    table_name: str,
+    limit: int = 100,
+    offset: int = 0
+):
+    """
+    Retrieves records for a specific table to display in the 'Fetched Table from database' studio grid.
+    """
+    adapter = db_manager.get_adapter(connection_id)
+    if not adapter:
+        raise HTTPException(status_code=404, detail=f"Connection '{connection_id}' not found.")
+    
+    schema = db_manager.get_schema(connection_id)
+    if table_name not in schema.tables:
+        raise HTTPException(status_code=404, detail=f"Table '{table_name}' does not exist in schema.")
+
+    # Escape table identifier safely
+    safe_table = table_name.replace('"', '""')
+    sql = f'SELECT * FROM "{safe_table}" LIMIT {limit} OFFSET {offset};'
+    
+    res = adapter.execute_query(sql, limit=limit)
+    return {
+        "table_name": table_name,
+        "columns": res.columns,
+        "rows": res.rows,
+        "total_rows": res.total_rows,
+        "execution_time_ms": res.execution_time_ms,
+        "truncated": res.truncated,
+        "error": res.error
+    }
+

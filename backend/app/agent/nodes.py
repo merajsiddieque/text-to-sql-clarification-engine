@@ -134,7 +134,7 @@ def execute_sql_node(state: TextToSQLState) -> Dict[str, Any]:
             "status": "failed"
         }
 
-    sanitized_sql = state.get("sanitized_sql", "")
+    sanitized_sql = state.get("sanitized_sql") or state.get("generated_sql", "")
     exec_result = adapter.execute_query(sanitized_sql)
 
     if exec_result.error:

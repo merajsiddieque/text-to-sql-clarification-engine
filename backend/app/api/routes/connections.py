@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from app.db.manager import db_manager
+from app.db.importer import process_uploaded_database, UploadLimitError
 from app.core.security import encrypt_secret
 import uuid
 
@@ -101,3 +103,36 @@ def delete_connection(connection_id: str):
     if not removed:
         raise HTTPException(status_code=404, detail="Connection not found.")
     return {"success": True, "message": f"Connection '{connection_id}' removed."}
+
+
+@router.post("/upload")
+async def upload_database(
+    file: UploadFile = File(...),
+    name: Optional[str] = Form(None)
+):
+    """
+    Upload a database or data file (.sql, .sqlite, .db, .dump, .csv, .tsv, .bak, .sql.gz)
+    and register it as a queryable database connection.
+    """
+    try:
+        file.file.seek(0, 2)
+        upload_size = file.file.tell()
+        file.file.seek(0)
+        if not upload_size:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+        result = await run_in_threadpool(
+            process_uploaded_database,
+            file_bytes=file.file,
+            filename=file.filename,
+            custom_name=name
+        )
+        return result
+    except HTTPException:
+        raise
+    except UploadLimitError as limit_error:
+        raise HTTPException(status_code=413, detail=str(limit_error))
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process database file: {str(e)}")

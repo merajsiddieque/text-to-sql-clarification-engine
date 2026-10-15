@@ -181,8 +181,8 @@ export function ResultVisualizer({ executionResult, visualizationType = 'table' 
       {/* TABLE VIEW */}
       {viewMode === 'table' && (
         <div className="bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden">
-          <div className="overflow-x-auto max-h-96">
-            <table className="w-full text-left text-xs">
+          <div className="overflow-auto max-h-[min(60vh,32rem)] min-w-0 overscroll-contain">
+            <table className="w-full min-w-max text-left text-xs">
               <thead className="bg-slate-950/80 text-slate-300 uppercase tracking-wider sticky top-0 z-10 border-b border-slate-800">
                 <tr>
                   {columns.map((col) => (

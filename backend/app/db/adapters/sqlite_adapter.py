@@ -15,18 +15,30 @@ class SQLiteDatabaseAdapter(BaseDatabaseAdapter):
 
     def __init__(self, connection_id: str, name: str, db_path: str, read_only: bool = True):
         super().__init__(connection_id, name)
-        self.db_path = os.path.abspath(db_path)
+        self.is_memory = db_path.startswith("file:") and "mode=memory" in db_path
+        self.db_path = db_path if self.is_memory else os.path.abspath(db_path)
         self.read_only = read_only
+        self._anchor_connection = (
+            sqlite3.connect(self.db_path, uri=True, timeout=settings.DEFAULT_QUERY_TIMEOUT_SECONDS)
+            if self.is_memory else None
+        )
+
+    def load_from_connection(self, source: sqlite3.Connection) -> None:
+        """Copies an imported in-memory database into this adapter's shared memory DB."""
+        if not self.is_memory or self._anchor_connection is None:
+            raise ValueError("Database adapter is not backed by in-memory SQLite.")
+        source.backup(self._anchor_connection)
 
     @property
     def dialect(self) -> str:
         return "sqlite"
 
     def _get_connection(self) -> sqlite3.Connection:
-        if not os.path.exists(self.db_path):
+        if self.is_memory:
+            conn = sqlite3.connect(self.db_path, uri=True, timeout=settings.DEFAULT_QUERY_TIMEOUT_SECONDS)
+        elif not os.path.exists(self.db_path):
             raise FileNotFoundError(f"SQLite database file not found at {self.db_path}")
-
-        if self.read_only:
+        elif self.read_only:
             # Open using SQLite URI in read-only mode to prevent any filesystem writes
             uri = f"file:{self.db_path}?mode=ro"
             conn = sqlite3.connect(uri, uri=True, timeout=settings.DEFAULT_QUERY_TIMEOUT_SECONDS)
@@ -41,7 +53,9 @@ class SQLiteDatabaseAdapter(BaseDatabaseAdapter):
         conn.close()
 
     def disconnect(self) -> None:
-        pass
+        if self._anchor_connection is not None:
+            self._anchor_connection.close()
+            self._anchor_connection = None
 
     def test_connection(self) -> bool:
         try:

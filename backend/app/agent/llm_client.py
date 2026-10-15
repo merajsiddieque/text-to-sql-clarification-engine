@@ -1,5 +1,6 @@
 import json
 import re
+import urllib.request
 from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from app.core.config import settings
@@ -12,17 +13,17 @@ class AmbiguityResult(BaseModel):
     options: List[Dict[str, str]] = Field(default_factory=list)
 
 
-# Ambiguity detection patterns for heuristic fallback
+# Fallback ambiguity rules for when LLM is unreachable
 AMBIGUITY_RULES = [
     {
         "keywords": ["best", "top performing", "most popular", "highest performing"],
         "target": "product",
-        "reason": "Product performance can be measured in multiple distinct ways (revenue, quantity sold, or customer ratings).",
-        "question": "How would you like to define product performance?",
+        "reason": "Performance can be measured in multiple distinct ways (revenue, quantity sold, or customer ratings).",
+        "question": "How would you like to define performance?",
         "options": [
             {"id": "revenue", "label": "Total Revenue", "description": "Rank by total gross sales dollars generated."},
             {"id": "units", "label": "Units Sold", "description": "Rank by total quantity of items purchased."},
-            {"id": "rating", "label": "Average Rating", "description": "Rank by average product review score (1-5 stars)."}
+            {"id": "rating", "label": "Average Rating", "description": "Rank by average review score (1-5 stars)."}
         ]
     },
     {
@@ -42,19 +43,9 @@ AMBIGUITY_RULES = [
         "reason": "Active customers could refer to account status flag or purchase activity.",
         "question": "How should active customers be filtered?",
         "options": [
-            {"id": "account_status", "label": "Account Status Flag", "description": "Customers where account_status = 'active'."},
+            {"id": "account_status", "label": "Account Status Flag", "description": "Customers where account_status = 'active'."
+            },
             {"id": "recent_orders", "label": "Recent Purchase", "description": "Customers who completed an order within the last 30 days."}
-        ]
-    },
-    {
-        "keywords": ["high value order", "big order", "large order"],
-        "target": "order",
-        "reason": "High-value threshold depends on business definition.",
-        "question": "What threshold defines a high value order?",
-        "options": [
-            {"id": "over_500", "label": "Over $500", "description": "Orders with total amount greater than $500."},
-            {"id": "over_1000", "label": "Over $1,000", "description": "Orders with total amount greater than $1,000."},
-            {"id": "top_10_percent", "label": "Top 10%", "description": "Orders in the 90th percentile of order values."}
         ]
     }
 ]
@@ -62,60 +53,88 @@ AMBIGUITY_RULES = [
 
 class LLMClient:
     """
-    Unified LLM Client supporting Google Gemini with intelligent offline heuristic fallbacks.
-    Ensures complete robustness whether online with Gemini API keys or offline in test environments.
+    Production Gemini LLM Client for Text-to-SQL reasoning, query synthesis,
+    ambiguity disambiguation, and self-repairing SQL.
+    Supports all connected and uploaded databases (.sql, .sqlite, .db, .dump, .csv, .tsv, .bak, .sql.gz).
     """
 
     def __init__(self):
         self.api_key = settings.GEMINI_API_KEY
-        self._model = None
-        if self.api_key:
+        self.models = settings.LLM_FALLBACK_MODELS
+
+    def _call_gemini(self, prompt: str, timeout: int = 8) -> Optional[str]:
+        """Direct REST caller for Gemini with multi-model fallback."""
+        if not self.api_key:
+            return None
+
+        payload = json.dumps({
+            "contents": [
+                {
+                    "parts": [{"text": prompt}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.1,
+                "topP": 0.95,
+            }
+        }).encode("utf-8")
+
+        for model_name in self.models:
+            clean_model = model_name.replace("models/", "")
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model}:generateContent?key={self.api_key}"
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"}
+            )
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=self.api_key)
-                self._model = genai.GenerativeModel(settings.DEFAULT_LLM_MODEL)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            if parts:
+                                return parts[0].get("text", "").strip()
             except Exception as e:
-                print(f"Warning: Failed to initialize Gemini model: {e}")
+                # Try next candidate model
+                continue
+
+        return None
 
     def detect_ambiguity(self, query: str, schema_context: str) -> AmbiguityResult:
         """
-        Evaluates whether a natural language question contains business ambiguities
-        that require clarification rather than guessing.
+        Uses Gemini LLM to decide if the user's natural query contains business ambiguity.
         """
-        # 1. Try Gemini if configured
-        if self._model:
-            prompt = f"""
-You are an expert SQL Business Analyst. Determine if the user's question contains ambiguity that needs clarification.
-Database Schema:
+        gemini_prompt = f"""
+You are an expert SQL Business Analyst. Determine if the user's question contains business ambiguity that requires clarification before writing SQL.
+Database Schema Context:
 {schema_context}
 
 User Question: "{query}"
 
-Analyze if this question is ambiguous (for example, vague terms like 'best', 'top performing', 'churned', 'active', 'high value', or multiple conflicting metric definitions).
-Respond ONLY in valid JSON matching this schema:
+Rules:
+1. If the question is clear and can be answered directly by the schema, set "is_ambiguous": false.
+2. If vague terms like 'best', 'top', 'active', 'good' have multiple conflicting definitions in this database schema, set "is_ambiguous": true and provide 2-3 specific clarification options.
+3. Respond ONLY in valid JSON matching this exact structure:
 {{
-    "is_ambiguous": boolean,
-    "reason": "explanation of ambiguity or null",
-    "clarification_question": "question to ask user or null",
-    "options": [
-        {{"id": "option_id", "label": "Short Title", "description": "Detailed explanation"}}
-    ]
+    "is_ambiguous": false,
+    "reason": null,
+    "clarification_question": null,
+    "options": []
 }}
 """
+        response_text = self._call_gemini(gemini_prompt)
+        if response_text:
             try:
-                response = self._model.generate_content(prompt)
-                text = response.text.strip()
-                # Clean markdown blocks if present
-                if text.startswith("```json"):
-                    text = text[7:]
-                if text.endswith("```"):
-                    text = text[:-3]
-                data = json.loads(text.strip())
+                cleaned = re.sub(r"^```(?:json)?\s*", "", response_text, flags=re.IGNORECASE)
+                cleaned = re.sub(r"\s*```$", "", cleaned)
+                data = json.loads(cleaned.strip())
                 return AmbiguityResult(**data)
             except Exception:
                 pass
 
-        # 2. Offline / Heuristic Ambiguity Detection
+        # Offline / heuristic fallback
         lower_q = query.lower()
         for rule in AMBIGUITY_RULES:
             for kw in rule["keywords"]:
@@ -137,167 +156,129 @@ Respond ONLY in valid JSON matching this schema:
         clarification_context: Optional[str] = None
     ) -> str:
         """
-        Generates dialect-accurate SQL from natural language grounded in schema context.
+        Uses Gemini LLM to analyze the schema of any connected or uploaded database,
+        decide which tables and columns to query, and generate accurate SQL.
         """
-        if self._model:
-            clarification_str = f"User Clarification: {clarification_context}\n" if clarification_context else ""
-            prompt = f"""
-You are an expert SQL generator for {dialect.upper()}.
-Generate a read-only SQL query to answer the user question.
+        clarification_text = f"User Clarification Decision: {clarification_context}\n" if clarification_context else ""
+        gemini_prompt = f"""
+You are a Principal Database Architect and SQL Generator for {dialect.upper()}.
+Task: Write a precise, read-only SQL query to answer the user's question.
 
-Database Schema:
+Database Schema (Tables, Columns, Types, and Sample Data):
 {schema_context}
 
-{clarification_str}
+{clarification_text}
 User Question: "{query}"
 
-Rules:
-1. Return ONLY the raw SQL query. Do not wrap in markdown quotes, backticks, or write explanations.
-2. The query must be strictly a read-only SELECT statement.
-3. Use exact table and column names from the schema.
-4. Ensure dialect compatibility for {dialect.upper()}.
-5. Add a reasonable LIMIT clause if none is implied (max 100).
+Strict Rules:
+1. Return ONLY the raw SQL query. No explanations, no markdown backticks, no markdown formatting.
+2. The query MUST be strictly a read-only SELECT statement.
+3. Use only tables and columns that exist in the provided Database Schema.
+4. If querying an uploaded table or custom database, match the exact column names given in the schema.
+5. If table or column names contain spaces or special characters, wrap them in double quotes ("table", "column").
+6. Ensure syntax is 100% compatible with {dialect.upper()}.
+7. Add a reasonable LIMIT clause (e.g. LIMIT 50 or 100) if no limit is specified.
 """
+        response_text = self._call_gemini(gemini_prompt)
+        if response_text:
+            cleaned = re.sub(r"^```(?:sql)?\s*", "", response_text, flags=re.IGNORECASE)
+            cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+            if cleaned:
+                return cleaned
+
+        # Dynamic fallback for uploaded databases or demo DB
+        lower_q = query.lower()
+        # If schema contains tables, query first available table
+        tables_match = re.findall(r"Table:\s*([a-zA-Z0-9_]+)", schema_context)
+        if tables_match:
+            first_tbl = tables_match[0]
+            if "count" in lower_q or "how many" in lower_q or "total" in lower_q:
+                return f'SELECT COUNT(*) AS total_records FROM "{first_tbl}";'
+            return f'SELECT * FROM "{first_tbl}" LIMIT 25;'
+
+        return "SELECT 1;"
+
+    def summarize_results(
+        self,
+        query: str,
+        columns: List[str],
+        rows: List[Dict[str, Any]]
+    ) -> Tuple[str, str]:
+        """
+        Uses Gemini LLM to analyze the fetched query result records and produce
+        an executive summary with suggested visualization type (table, bar, line, pie).
+        """
+        if not rows:
+            return "Query executed successfully, but returned 0 records.", "table"
+
+        # Prepare a sample of up to 10 rows for LLM summary
+        sample_rows = rows[:10]
+        gemini_prompt = f"""
+You are a Senior Data Analyst. Summarize the query results into a concise executive finding.
+User Question: "{query}"
+Returned Columns: {columns}
+Sample Rows ({len(sample_rows)} of {len(rows)}):
+{json.dumps(sample_rows, default=str)}
+
+Respond in valid JSON with:
+{{
+  "summary": "1-2 sentence high-level takeaway summarizing the numbers and business insight.",
+  "visualization_type": "table" | "bar" | "line" | "pie"
+}}
+"""
+        response_text = self._call_gemini(gemini_prompt, timeout=12)
+        if response_text:
             try:
-                response = self._model.generate_content(prompt)
-                sql = response.text.strip()
-                # Remove markdown fences if present
-                sql = re.sub(r"^```(?:sql)?\s*", "", sql, flags=re.IGNORECASE)
-                sql = re.sub(r"\s*```$", "", sql)
-                return sql.strip()
+                cleaned = re.sub(r"^```(?:json)?\s*", "", response_text, flags=re.IGNORECASE)
+                cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+                parsed = json.loads(cleaned)
+                return parsed.get("summary", ""), parsed.get("visualization_type", "table")
             except Exception:
                 pass
 
-        # Smart Heuristic SQL Generator for standard test queries & demo database
-        lower_q = query.lower()
-        
-        # Product queries
-        if "product" in lower_q:
-            if clarification_context == "revenue" or "revenue" in lower_q:
-                return (
-                    "SELECT p.name AS product_name, c.name AS category, "
-                    "ROUND(SUM(oi.quantity * (oi.unit_price - oi.discount)), 2) AS total_revenue "
-                    "FROM products p "
-                    "JOIN categories c ON p.category_id = c.category_id "
-                    "JOIN order_items oi ON p.product_id = oi.product_id "
-                    "JOIN orders o ON oi.order_id = o.order_id "
-                    "WHERE o.order_status = 'completed' "
-                    "GROUP BY p.product_id, p.name, c.name "
-                    "ORDER BY total_revenue DESC LIMIT 10;"
-                )
-            elif clarification_context == "units" or "units" in lower_q or "quantity" in lower_q:
-                return (
-                    "SELECT p.name AS product_name, c.name AS category, SUM(oi.quantity) AS total_units_sold "
-                    "FROM products p "
-                    "JOIN categories c ON p.category_id = c.category_id "
-                    "JOIN order_items oi ON p.product_id = oi.product_id "
-                    "GROUP BY p.product_id, p.name, c.name "
-                    "ORDER BY total_units_sold DESC LIMIT 10;"
-                )
-            elif clarification_context == "rating" or "rating" in lower_q:
-                return (
-                    "SELECT p.name AS product_name, ROUND(AVG(pr.rating), 2) AS avg_rating, COUNT(pr.review_id) AS review_count "
-                    "FROM products p "
-                    "JOIN product_reviews pr ON p.product_id = pr.product_id "
-                    "GROUP BY p.product_id, p.name "
-                    "HAVING COUNT(pr.review_id) >= 2 "
-                    "ORDER BY avg_rating DESC, review_count DESC LIMIT 10;"
-                )
-            else:
-                return "SELECT product_id, name, unit_price, stock_quantity FROM products ORDER BY unit_price DESC LIMIT 10;"
+        # Clean fallback summary
+        count = len(rows)
+        vis_type = "table"
+        if len(columns) == 2 and any(isinstance(rows[0].get(c), (int, float)) for c in columns):
+            vis_type = "bar"
 
-        # Customer queries
-        if "customer" in lower_q:
-            if "country" in lower_q:
-                return (
-                    "SELECT country, COUNT(customer_id) AS customer_count "
-                    "FROM customers GROUP BY country ORDER BY customer_count DESC;"
-                )
-            return (
-                "SELECT c.customer_id, c.first_name, c.last_name, c.country, "
-                "ROUND(SUM(o.total_amount), 2) AS total_spent "
-                "FROM customers c "
-                "JOIN orders o ON c.customer_id = o.customer_id "
-                "WHERE o.order_status = 'completed' "
-                "GROUP BY c.customer_id, c.first_name, c.last_name, c.country "
-                "ORDER BY total_spent DESC LIMIT 10;"
-            )
+        return f"Successfully retrieved {count} record{'s' if count != 1 else ''} matching your query.", vis_type
 
-        # Orders & revenue queries
-        if "revenue" in lower_q or "sale" in lower_q or "order" in lower_q:
-            if "status" in lower_q:
-                return "SELECT order_status, COUNT(*) AS count, ROUND(SUM(total_amount), 2) AS total_value FROM orders GROUP BY order_status;"
-            if "country" in lower_q:
-                return "SELECT shipping_country, ROUND(SUM(total_amount), 2) AS revenue FROM orders WHERE order_status = 'completed' GROUP BY shipping_country ORDER BY revenue DESC LIMIT 10;"
-            return "SELECT order_id, order_date, shipping_country, total_amount, order_status FROM orders ORDER BY order_date DESC LIMIT 20;"
-
-        # Default fallback
-        return "SELECT * FROM categories LIMIT 10;"
-
-    def repair_sql(self, failed_sql: str, error_message: str, schema_context: str, dialect: str) -> str:
+    def repair_sql(
+        self,
+        failed_sql: str,
+        error_message: str,
+        schema_context: str,
+        dialect: str = "sqlite"
+    ) -> str:
         """
-        Self-healing SQL repair: corrects syntax, dialect discrepancies, or grounding errors.
+        Uses Gemini LLM to self-heal a failed SQL query by correcting syntax or column names.
         """
-        if self._model:
-            prompt = f"""
-The following SQL query failed execution or validation on {dialect.upper()}:
-Failed Query:
-{failed_sql}
-
-Error:
-{error_message}
-
+        gemini_prompt = f"""
+You are an expert SQL debugger. The following SQL query failed with an execution error.
 Database Schema:
 {schema_context}
 
-Please fix the error and return ONLY the corrected read-only SQL query without explanations or markdown quotes.
+Failed SQL Query:
+{failed_sql}
+
+Error Message:
+{error_message}
+
+Task: Repair the SQL query so that it executes successfully on {dialect.upper()}.
+Rules:
+1. Return ONLY the repaired raw SQL statement.
+2. Do not wrap in markdown quotes or explanations.
 """
-            try:
-                response = self._model.generate_content(prompt)
-                sql = response.text.strip()
-                sql = re.sub(r"^```(?:sql)?\s*", "", sql, flags=re.IGNORECASE)
-                sql = re.sub(r"\s*```$", "", sql)
-                return sql.strip()
-            except Exception:
-                pass
+        response_text = self._call_gemini(gemini_prompt)
+        if response_text:
+            cleaned = re.sub(r"^```(?:sql)?\s*", "", response_text, flags=re.IGNORECASE)
+            cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+            if cleaned:
+                return cleaned
 
-        # Offline fallback repair: strip destructive or invalid tokens
-        clean = failed_sql.replace("DROP TABLE", "").replace("DELETE FROM", "")
-        return clean
-
-    def summarize_results(self, query: str, columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[str, str]:
-        """
-        Produces a concise business summary and selects the optimal chart type.
-        """
-        if not rows:
-            return "The query executed successfully but returned 0 records.", "table"
-
-        num_rows = len(rows)
-        first_row = rows[0]
-
-        # Determine visualization type
-        vis_type = "table"
-        numeric_cols = [c for c, v in first_row.items() if isinstance(v, (int, float))]
-        text_cols = [c for c, v in first_row.items() if isinstance(v, str)]
-
-        if num_rows == 1 and len(numeric_cols) == 1 and len(columns) <= 2:
-            vis_type = "metric"
-        elif any("date" in c.lower() or "month" in c.lower() or "year" in c.lower() for c in columns) and numeric_cols:
-            vis_type = "line"
-        elif text_cols and numeric_cols and num_rows <= 15:
-            vis_type = "bar"
-        elif len(rows) <= 6 and numeric_cols and any("status" in c.lower() or "category" in c.lower() for c in columns):
-            vis_type = "pie"
-
-        # Executive summary
-        summary = f"Found {num_rows} result{'s' if num_rows != 1 else ''} matching your inquiry."
-        if numeric_cols and rows:
-            top_metric = numeric_cols[0]
-            top_val = rows[0].get(top_metric)
-            label = list(rows[0].values())[0]
-            summary += f" The leading entry is '{label}' with {top_metric.replace('_', ' ')} of {top_val}."
-
-        return summary, vis_type
+        return failed_sql
 
 
+# Global singleton instance
 llm_client = LLMClient()

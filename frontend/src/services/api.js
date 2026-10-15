@@ -84,3 +84,31 @@ export async function runBenchmarkSuite() {
   if (!res.ok) throw new Error('Failed to run benchmark');
   return res.json();
 }
+
+export async function uploadDatabaseFile(file, customName = '') {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (customName) {
+    formData.append('name', customName);
+  }
+
+  const res = await fetch(`${API_BASE}/connections/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to upload database file');
+  }
+  return res.json();
+}
+
+export async function fetchTableData(connectionId, tableName, limit = 100) {
+  const res = await fetch(`${API_BASE}/schema/${connectionId}/table/${encodeURIComponent(tableName)}?limit=${limit}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to fetch table data');
+  }
+  return res.json();
+}
+
