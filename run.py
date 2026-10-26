@@ -29,7 +29,7 @@ python_bin = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
 
 def main():
     print("=" * 65)
-    print(" 🚀 Launching Text-to-SQL Studio (Backend + Frontend)")
+    print("Launching Text-to-SQL Studio (Backend + Frontend)")
     print("=" * 65)
     print(" • Backend API:       http://127.0.0.1:8000 (Docs: /docs)")
     print(" • Frontend Web App:  http://localhost:5173")
@@ -39,7 +39,7 @@ def main():
     # Ensure demo database exists
     demo_db = os.path.join(BACKEND_DIR, "demo_data", "ecommerce.db")
     if not os.path.exists(demo_db):
-        print("📦 Initializing demo e-commerce SQLite database...")
+        print("Initializing demo e-commerce SQLite database...")
         subprocess.run([python_bin, os.path.join(BACKEND_DIR, "demo_data", "init_demo_db.py")], cwd=ROOT_DIR)
 
     # Launch Backend
@@ -51,15 +51,15 @@ def main():
         "--port", "8000",
         "--reload"
     ]
-    print("🟢 Starting FastAPI backend on http://127.0.0.1:8000...")
+    print("Starting FastAPI backend on http://127.0.0.1:8000...")
     backend_proc = subprocess.Popen(backend_cmd, cwd=BACKEND_DIR, env=backend_env)
 
     # Launch Frontend
-    print("🔵 Starting Vite React frontend on http://localhost:5173...")
+    print("Starting Vite React frontend on http://localhost:5173...")
     frontend_proc = subprocess.Popen([NPM_CMD, "run", "dev"], cwd=FRONTEND_DIR)
 
     def shutdown(sig, frame):
-        print("\n\n🛑 Stopping both servers...")
+        print("\n\nStopping both servers...")
         try:
             backend_proc.terminate()
         except Exception:
@@ -70,7 +70,7 @@ def main():
             pass
         backend_proc.wait()
         frontend_proc.wait()
-        print("✅ Servers stopped cleanly. Goodbye!\n")
+        print("Servers stopped cleanly. Goodbye!\n")
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
@@ -81,10 +81,10 @@ def main():
         # Keep process alive while monitoring children
         while True:
             if backend_proc.poll() is not None:
-                print("⚠️ Backend server exited unexpectedly.")
+                print("Backend server exited unexpectedly.")
                 break
             if frontend_proc.poll() is not None:
-                print("⚠️ Frontend server exited unexpectedly.")
+                print("Frontend server exited unexpectedly.")
                 break
             time.sleep(1)
     except KeyboardInterrupt:

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Database, Plus, CheckCircle2, AlertCircle, Trash2, PlugZap, Shield } from 'lucide-react';
-import { testConnection, createConnection, deleteConnection } from '../../services/api';
+import { testConnection, createConnection, deleteConnection, createLocalPairing } from '../../services/api';
 
 export default function ConnectionWizard({
   connections,
@@ -9,6 +9,9 @@ export default function ConnectionWizard({
   setActiveConnectionId,
   onOpenUploadModal
 }) {
+  const backendBaseUrl = import.meta.env.VITE_API_BASE_URL
+    ? import.meta.env.VITE_API_BASE_URL.replace(/\/api\/v1\/?$/, '')
+    : (import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:8000` : window.location.origin);
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -26,6 +29,24 @@ export default function ConnectionWizard({
   const [isTesting, setIsTesting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [localPairing, setLocalPairing] = useState(null);
+  const [pairingError, setPairingError] = useState('');
+  const [isCreatingPairing, setIsCreatingPairing] = useState(false);
+
+  const handleCreatePairing = async () => {
+    setIsCreatingPairing(true);
+    setPairingError('');
+    try {
+      const pairing = await createLocalPairing();
+      setLocalPairing(pairing);
+      await onConnectionsChanged();
+      setActiveConnectionId(pairing.connection_id);
+    } catch (error) {
+      setPairingError(error.message);
+    } finally {
+      setIsCreatingPairing(false);
+    }
+  };
 
   const handleDialectChange = (dialect) => {
     setFormData(prev => ({
@@ -118,8 +139,36 @@ export default function ConnectionWizard({
             <Plus className="w-4 h-4" />
             {showAddForm ? 'Cancel' : 'Connect Cloud / Server DB'}
           </button>
+          <button
+            onClick={handleCreatePairing}
+            disabled={isCreatingPairing}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            <PlugZap className="w-4 h-4" />
+            {isCreatingPairing ? 'Preparing…' : 'Connect Local MySQL'}
+          </button>
         </div>
       </div>
+
+      {(localPairing || pairingError) && (
+        <div className="bg-slate-900/80 p-5 rounded-2xl border border-indigo-500/30 space-y-3">
+          <div className="font-semibold text-sm text-white">Pair the desktop connector</div>
+          {pairingError && <div className="text-xs text-red-300">{pairingError}</div>}
+          {localPairing && <>
+            <p className="text-xs text-slate-300">Download and open the desktop connector on the computer that can access MySQL. Enter this one-time code within 10 minutes.</p>
+            <a
+              href="https://github.com/merajsiddieque/text-to-sql-clarification-engine/releases/latest/download/LocalMySQLConnector.exe"
+              className="inline-flex text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline"
+              target="_blank"
+              rel="noreferrer"
+            >Download Local MySQL Connector for Windows (.exe)</a>
+            <div className="font-mono text-lg tracking-wider text-indigo-200">{localPairing.pair_code}</div>
+            <div className="text-xs text-slate-400">Backend URL: {backendBaseUrl}</div>
+            <p className="text-xs text-slate-400">Open the downloaded app and enter this code along with your local MySQL details. Use a read-only MySQL account.</p>
+            <button onClick={() => setLocalPairing(null)} className="text-xs text-slate-400 hover:text-white">Dismiss</button>
+          </>}
+        </div>
+      )}
 
       {/* Add Connection Form Drawer */}
       {showAddForm && (
@@ -323,7 +372,7 @@ export default function ConnectionWizard({
 
               <div className="mt-5 flex items-center justify-between pt-3 border-t border-slate-800/80">
                 <span className="text-xs text-slate-400">
-                  {conn.is_demo ? 'Built-in Demo' : 'Custom Connected'}
+                  {conn.is_demo ? 'Built-in Demo' : (conn.is_local ? 'Desktop Connector' : 'Custom Connected')}
                 </span>
                 {isActive ? (
                   <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1">

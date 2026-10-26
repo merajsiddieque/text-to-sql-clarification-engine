@@ -1,0 +1,43 @@
+name: Release Local MySQL Connector
+
+on:
+  push:
+    tags:
+      - "connector-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install connector dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt pyinstaller
+
+      - name: Build Windows executable
+        run: >-
+          python -m PyInstaller --noconfirm --clean --onefile --windowed
+          --name LocalMySQLConnector --paths backend
+          --hidden-import sqlalchemy.dialects.mysql.pymysql
+          backend/desktop_connector.py
+
+      - name: Publish release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: connector-v0.1.0
+          name: Local MySQL Connector v0.1.0
+          body: Windows desktop connector for securely querying a local MySQL database from the Text-to-SQL app.
+          make_latest: true
+          files: dist/LocalMySQLConnector.exe

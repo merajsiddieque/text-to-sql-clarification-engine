@@ -41,7 +41,10 @@ def verify_firebase_token(token: str) -> Dict[str, Any]:
 async def attach_authenticated_user(request: Request, call_next):
     """Authenticate hosted API requests; local development remains usable without Firebase."""
     api_prefix = settings.API_V1_STR.rstrip("/") + "/"
-    if request.url.path.startswith(api_prefix) and settings.REQUIRE_FIREBASE_AUTH:
+    local_agent_path = "/connections/local/"
+    is_pair_redemption = request.url.path.endswith(local_agent_path + "pair")
+    is_agent_request = local_agent_path + "agent/" in request.url.path
+    if request.url.path.startswith(api_prefix) and settings.REQUIRE_FIREBASE_AUTH and not (is_pair_redemption or is_agent_request):
         authorization = request.headers.get("authorization", "")
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not token:

@@ -46,6 +46,15 @@ export async function deleteConnection(connectionId) {
   return res.json();
 }
 
+export async function createLocalPairing() {
+  const res = await authorizedFetch(`${API_BASE}/connections/local/pairing`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to create a local connector pairing code');
+  }
+  return res.json();
+}
+
 export async function fetchSchema(connectionId) {
   const res = await authorizedFetch(`${API_BASE}/schema/${connectionId}`);
   if (!res.ok) throw new Error('Failed to fetch schema');

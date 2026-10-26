@@ -4,7 +4,10 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from app.db.manager import db_manager
 from app.db.importer import process_uploaded_database, UploadLimitError
-from app.core.security import encrypt_secret
+from app.db.local_relay import local_agent_relay
+from fastapi import Header
+import hashlib
+import secrets
 import uuid
 
 router = APIRouter(prefix="/connections", tags=["connections"])
@@ -30,6 +33,76 @@ class ConnectionResponse(BaseModel):
     name: str
     dialect: str
     is_demo: bool
+    is_local: bool = False
+
+
+class LocalPairRequest(BaseModel):
+    pair_code: str
+
+
+class LocalAgentResult(BaseModel):
+    call_id: str
+    success: bool
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+@router.post("/local/pairing")
+def create_local_pairing(request: Request):
+    """Create a short-lived code for pairing the desktop connector."""
+    connection_id = f"local_{uuid.uuid4().hex[:12]}"
+    token = secrets.token_urlsafe(32)
+    pair_code = local_agent_relay.create_pairing_code(connection_id, _token_hash(token))
+    _pair_tokens[connection_id] = token
+    db_manager.register_local_agent(connection_id, "Local MySQL (Desktop Connector)")
+    db_manager.set_connection_owner(connection_id, request.state.user_id)
+    return {"connection_id": connection_id, "pair_code": pair_code, "expires_in_seconds": 600}
+
+
+@router.post("/local/pair")
+def pair_local_agent(req: LocalPairRequest):
+    """Redeem a pairing code from the desktop connector. The code expires after 10 minutes."""
+    connection_id = local_agent_relay.redeem_pairing_code(req.pair_code.strip())
+    if not connection_id:
+        raise HTTPException(status_code=400, detail="Pairing code is invalid or expired. Generate a new code in the web app.")
+    # The secret is generated once by the authenticated pairing endpoint and held only there.
+    token = _pair_tokens.pop(connection_id, None)
+    if not token:
+        raise HTTPException(status_code=400, detail="Pairing session expired. Generate a new code in the web app.")
+    return {"connection_id": connection_id, "agent_token": token}
+
+
+_pair_tokens: Dict[str, str] = {}
+
+
+def _authenticate_agent(connection_id: str, authorization: Optional[str]) -> None:
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not local_agent_relay.authenticate_agent(connection_id, _token_hash(token)):
+        raise HTTPException(status_code=401, detail="Invalid connector token.")
+
+
+@router.get("/local/agent/{connection_id}/next")
+def next_local_agent_operation(connection_id: str, authorization: Optional[str] = Header(None)):
+    _authenticate_agent(connection_id, authorization)
+    return local_agent_relay.next_operation(connection_id, timeout=20)
+
+
+@router.post("/local/agent/{connection_id}/result")
+def submit_local_agent_result(connection_id: str, req: LocalAgentResult, authorization: Optional[str] = Header(None)):
+    _authenticate_agent(connection_id, authorization)
+    accepted = local_agent_relay.resolve(connection_id, req.call_id, req.model_dump(exclude={"call_id"}))
+    return {"accepted": accepted}
+
+
+@router.get("/local/{connection_id}/status")
+def local_connector_status(connection_id: str, request: Request):
+    if not db_manager.can_access_connection(connection_id, request.state.user_id):
+        raise HTTPException(status_code=404, detail="Connection not found.")
+    return {"online": local_agent_relay.is_online(connection_id)}
 
 
 @router.get("", response_model=List[ConnectionResponse])

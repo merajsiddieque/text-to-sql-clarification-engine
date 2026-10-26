@@ -5,6 +5,7 @@ from app.db.adapters.base import BaseDatabaseAdapter
 from app.db.adapters.sqlite_adapter import SQLiteDatabaseAdapter
 from app.db.adapters.postgres_adapter import PostgreSQLDatabaseAdapter
 from app.db.adapters.mysql_adapter import MySQLDatabaseAdapter
+from app.db.adapters.local_agent_adapter import LocalAgentDatabaseAdapter
 from app.schema.models import DatabaseSchema
 from app.core.config import settings
 from app.core.security import encrypt_secret, decrypt_secret
@@ -70,6 +71,12 @@ class DatabaseConnectionManager:
         self.invalidate_schema_cache(connection_id)
         return adapter
 
+    def register_local_agent(self, connection_id: str, name: str, dialect: str = "mysql") -> LocalAgentDatabaseAdapter:
+        adapter = LocalAgentDatabaseAdapter(connection_id, name, dialect)
+        self._adapters[connection_id] = adapter
+        self.invalidate_schema_cache(connection_id)
+        return adapter
+
     def get_adapter(self, connection_id: str) -> Optional[BaseDatabaseAdapter]:
         return self._adapters.get(connection_id)
 
@@ -82,7 +89,8 @@ class DatabaseConnectionManager:
                 "connection_id": cid,
                 "name": adapter.name,
                 "dialect": adapter.dialect,
-                "is_demo": cid == "demo-ecommerce"
+                "is_demo": cid == "demo-ecommerce",
+                "is_local": isinstance(adapter, LocalAgentDatabaseAdapter),
             })
         return connections
 
