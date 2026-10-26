@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Database, Plus, CheckCircle2, AlertCircle, Trash2, PlugZap, Shield, Download } from 'lucide-react';
-import { testConnection, createConnection, deleteConnection, createLocalPairing } from '../../services/api';
+import { testConnection, createConnection, deleteConnection, createLocalPairing, fetchConnections } from '../../services/api';
 
 export default function ConnectionWizard({
   connections,
@@ -32,21 +32,49 @@ export default function ConnectionWizard({
   const [localPairing, setLocalPairing] = useState(null);
   const [pairingError, setPairingError] = useState('');
   const [isCreatingPairing, setIsCreatingPairing] = useState(false);
+  const [pairingConnected, setPairingConnected] = useState(false);
 
   const handleCreatePairing = async () => {
     setIsCreatingPairing(true);
     setPairingError('');
     try {
       const pairing = await createLocalPairing();
+      setPairingConnected(false);
       setLocalPairing(pairing);
-      await onConnectionsChanged();
-      setActiveConnectionId(pairing.connection_id);
     } catch (error) {
       setPairingError(error.message);
     } finally {
       setIsCreatingPairing(false);
     }
   };
+
+  useEffect(() => {
+    if (!localPairing?.connection_id || pairingConnected) return undefined;
+    let stopped = false;
+    const startedAt = Date.now();
+    const timer = window.setInterval(async () => {
+      if (stopped) return;
+      try {
+        const currentConnections = await fetchConnections();
+        if (currentConnections.some(connection => connection.connection_id === localPairing.connection_id)) {
+          stopped = true;
+          window.clearInterval(timer);
+          setPairingConnected(true);
+          await onConnectionsChanged();
+          setActiveConnectionId(localPairing.connection_id);
+        } else if (Date.now() - startedAt >= (localPairing.expires_in_seconds || 600) * 1000) {
+          stopped = true;
+          window.clearInterval(timer);
+        }
+      } catch {
+        // Retry after transient API or Render wake-up failures.
+      }
+    }, 3000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [localPairing, pairingConnected, onConnectionsChanged, setActiveConnectionId]);
 
   const handleDialectChange = (dialect) => {
     setFormData(prev => ({
@@ -164,7 +192,7 @@ export default function ConnectionWizard({
           <div className="font-semibold text-sm text-white">Pair the desktop connector</div>
           {pairingError && <div className="text-xs text-red-300">{pairingError}</div>}
           {localPairing && <>
-            <p className="text-xs text-slate-300">Download and open the desktop connector on the computer that can access MySQL. Enter this one-time code within 10 minutes.</p>
+            <p className="text-xs text-slate-300">Download and open the desktop connector on the computer that can access MySQL. Enter this one-time code within 10 minutes. The database card appears after the connector validates MySQL and connects.</p>
             <a
               href="https://github.com/merajsiddieque/text-to-sql-clarification-engine/releases/latest/download/LocalMySQLConnector.exe"
               className="inline-flex text-xs font-semibold text-indigo-300 hover:text-indigo-200 underline"
@@ -174,6 +202,9 @@ export default function ConnectionWizard({
             <div className="font-mono text-lg tracking-wider text-indigo-200">{localPairing.pair_code}</div>
             <div className="text-xs text-slate-400">Backend URL: {backendBaseUrl}</div>
             <p className="text-xs text-slate-400">Open the downloaded app and enter this code along with your local MySQL details. Use a read-only MySQL account.</p>
+            <p className={`text-xs ${pairingConnected ? 'text-emerald-300' : 'text-amber-300'}`} role="status">
+              {pairingConnected ? 'MySQL connected. The database is ready to select.' : 'Waiting for the desktop connector to connect…'}
+            </p>
             <button onClick={() => setLocalPairing(null)} className="text-xs text-slate-400 hover:text-white">Dismiss</button>
           </>}
         </div>

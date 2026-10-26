@@ -58,8 +58,9 @@ def create_local_pairing(request: Request):
     token = secrets.token_urlsafe(32)
     pair_code = local_agent_relay.create_pairing_code(connection_id, _token_hash(token))
     _pair_tokens[connection_id] = token
-    db_manager.register_local_agent(connection_id, "Local MySQL (Desktop Connector)")
-    db_manager.set_connection_owner(connection_id, request.state.user_id)
+    # Keep this pairing pending until the desktop agent validates MySQL and
+    # begins polling the relay; pending pairings must not appear as databases.
+    _pair_owners[connection_id] = request.state.user_id
     return {"connection_id": connection_id, "pair_code": pair_code, "expires_in_seconds": 600}
 
 
@@ -77,6 +78,7 @@ def pair_local_agent(req: LocalPairRequest):
 
 
 _pair_tokens: Dict[str, str] = {}
+_pair_owners: Dict[str, str] = {}
 
 
 def _authenticate_agent(connection_id: str, authorization: Optional[str]) -> None:
@@ -88,6 +90,12 @@ def _authenticate_agent(connection_id: str, authorization: Optional[str]) -> Non
 @router.get("/local/agent/{connection_id}/next")
 def next_local_agent_operation(connection_id: str, authorization: Optional[str] = Header(None)):
     _authenticate_agent(connection_id, authorization)
+    if db_manager.get_adapter(connection_id) is None:
+        owner_id = _pair_owners.pop(connection_id, None)
+        if owner_id is None:
+            raise HTTPException(status_code=404, detail="Pairing session is no longer available. Generate a new code in the web app.")
+        db_manager.register_local_agent(connection_id, "Local MySQL (Desktop Connector)")
+        db_manager.set_connection_owner(connection_id, owner_id)
     return local_agent_relay.next_operation(connection_id, timeout=20)
 
 
