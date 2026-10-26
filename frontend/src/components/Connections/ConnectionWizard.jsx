@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Database, Plus, CheckCircle2, AlertCircle, Trash2, PlugZap, Shield } from 'lucide-react';
+import { Database, Plus, CheckCircle2, AlertCircle, Trash2, PlugZap, Shield, Download } from 'lucide-react';
 import { testConnection, createConnection, deleteConnection, createLocalPairing } from '../../services/api';
 
 export default function ConnectionWizard({
@@ -122,6 +122,15 @@ export default function ConnectionWizard({
         </div>
 
         <div className="flex items-center gap-2.5">
+          <a
+            href="https://github.com/merajsiddieque/text-to-sql-clarification-engine/releases/latest/download/LocalMySQLConnector.exe"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-slate-700"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Download className="w-4 h-4" />
+            <span>Download Connector (.exe)</span>
+          </a>
           {onOpenUploadModal && (
             <button
               onClick={onOpenUploadModal}
