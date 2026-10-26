@@ -186,15 +186,37 @@ Strict Rules:
             if cleaned:
                 return cleaned
 
-        # Dynamic fallback for uploaded databases or demo DB
+        # Dynamic fallback for uploaded databases or demo DB. Schema context
+        # formats table names inside backticks, so accept that representation
+        # as well as plain `Table: name` text.
         lower_q = query.lower()
-        # If schema contains tables, query first available table
-        tables_match = re.findall(r"Table:\s*([a-zA-Z0-9_]+)", schema_context)
-        if tables_match:
-            first_tbl = tables_match[0]
+        tables_match = re.findall(
+            r"Table:\s*(?:`([^`]+)`|([a-zA-Z0-9_]+))",
+            schema_context,
+            flags=re.IGNORECASE,
+        )
+        tables = [quoted or plain for quoted, plain in tables_match]
+        if tables:
+            # Prefer a table named in the request. This keeps the fallback
+            # useful when the model service is unavailable and the schema has
+            # several tables (for example, "students" in "select top students").
+            normalized_query = re.sub(r"[^a-z0-9]+", "", lower_q)
+            first_tbl = next(
+                (
+                    table
+                    for table in tables
+                    if re.sub(r"[^a-z0-9]+", "", table.lower()) in normalized_query
+                    or re.sub(r"[^a-z0-9]+", "", table.lower()).rstrip("s") in normalized_query
+                ),
+                tables[0],
+            )
+            if dialect.lower() == "mysql":
+                quoted_table = f"`{first_tbl.replace('`', '``')}`"
+            else:
+                quoted_table = f'"{first_tbl.replace(chr(34), chr(34) * 2)}"'
             if "count" in lower_q or "how many" in lower_q or "total" in lower_q:
-                return f'SELECT COUNT(*) AS total_records FROM "{first_tbl}";'
-            return f'SELECT * FROM "{first_tbl}" LIMIT 25;'
+                return f"SELECT COUNT(*) AS total_records FROM {quoted_table};"
+            return f"SELECT * FROM {quoted_table} LIMIT 25;"
 
         return "SELECT 1;"
 
